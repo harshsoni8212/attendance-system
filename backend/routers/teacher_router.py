@@ -1,8 +1,9 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
-from auth.dependencies import require_role
+from auth.dependencies import require_role, get_current_user
 import models
+from models import User
 from datetime import datetime
 from schemas.enrollment_schema import EnrollStudent
 from services.enrollment_service import enroll_student
@@ -12,6 +13,14 @@ import io
 
 router = APIRouter(prefix="/teacher", tags=["Teacher"])
 
+@router.get("/me")
+def get_teacher_profile(current_user: models.User = Depends(require_role("teacher"))):
+    return {
+        "id": current_user.id,
+        "name": current_user.name,
+        "email": current_user.email,
+        "role": current_user.role
+    }
 
 # ======================================
 # ✅ ENROLL STUDENT
