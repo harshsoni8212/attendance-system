@@ -25,25 +25,27 @@ class User(Base):
 
     id = Column(Integer, primary_key=True, index=True)
 
-    # 🔥 Public Identifier (Student / Teacher)
+    # Public identifier (STU-xxxx / TCH-xxxx)
     badge_number = Column(String, unique=True, index=True, nullable=True)
 
     name = Column(String, nullable=False)
     email = Column(String, unique=True, nullable=False)
     password = Column(String(255), nullable=False)
-    role = Column(String, nullable=False)  # admin / teacher / student
 
-    # Teacher → can own many classes
+    # admin / teacher / student
+    role = Column(String, nullable=False)
+
+    # Teacher → owns classes
     classes = relationship("Class", back_populates="teacher")
 
-    # Student → can enroll in many classes
+    # Student → enrolled classes
     enrolled_classes = relationship(
         "Class",
         secondary=class_students,
         back_populates="students"
     )
 
-    # Student → one face record
+    # Student → face data
     face = relationship(
         "StudentFace",
         back_populates="student",
@@ -61,21 +63,24 @@ class Class(Base):
 
     id = Column(Integer, primary_key=True, index=True)
 
-    # 🔥 Public Identifier
-    code = Column(String, unique=True, index=True)
+    # Public class code (CLS-1234 etc.)
+    code = Column(String, unique=True, index=True, nullable=False)
 
-    name = Column(String, nullable=False)
+    name = Column(String, nullable=False, index=True)
 
-    teacher_id = Column(Integer, ForeignKey("users.id"))
+    # Teacher can be assigned later
+    teacher_id = Column(Integer, ForeignKey("users.id"), nullable=True)
 
     teacher = relationship("User", back_populates="classes")
 
+    # Students enrolled
     students = relationship(
         "User",
         secondary=class_students,
         back_populates="enrolled_classes"
     )
 
+    # Attendance sessions
     sessions = relationship(
         "AttendanceSession",
         back_populates="class_",
@@ -91,7 +96,6 @@ class AttendanceSession(Base):
     __tablename__ = "attendance_sessions"
 
     id = Column(Integer, primary_key=True, index=True)
-    #session_code = Column(String, unique=True, index=True)
 
     class_id = Column(Integer, ForeignKey("classes.id"))
     teacher_id = Column(Integer, ForeignKey("users.id"))
@@ -101,7 +105,7 @@ class AttendanceSession(Base):
 
     is_active = Column(Boolean, default=True)
 
-    # 🔥 Geo-Fencing Fields
+    # Geo-Fencing
     latitude = Column(Float, nullable=False)
     longitude = Column(Float, nullable=False)
     radius_meters = Column(Float, default=20)
@@ -117,7 +121,7 @@ class AttendanceSession(Base):
 
 
 # =====================================================
-# ATTENDANCE MODEL (Session-Based)
+# ATTENDANCE MODEL
 # =====================================================
 
 class Attendance(Base):

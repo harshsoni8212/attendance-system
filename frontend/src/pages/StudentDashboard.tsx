@@ -41,6 +41,7 @@ export default function StudentDashboard() {
   // ================= LOGOUT =================
   const handleLogout = () => {
     localStorage.removeItem("token");
+    localStorage.removeItem("user");
     localStorage.removeItem("role");
     navigate("/");
   };
@@ -95,9 +96,15 @@ export default function StudentDashboard() {
     return () => clearInterval(interval);
   }, []);
 
+  // ================= CAPTURE IMAGE HELPER =================
+  const captureImage = () => {
+    if (!webcamRef.current) return null;
+    return webcamRef.current.getScreenshot();
+  };
+
   // ================= ENROLL FACE =================
   const enrollMyFace = async () => {
-    const imageSrc = webcamRef.current?.getScreenshot();
+    const imageSrc = captureImage();
 
     if (!imageSrc) {
       setMessage("Camera capture failed ❌");
@@ -114,17 +121,17 @@ export default function StudentDashboard() {
       await enrollFace(file);
 
       setMessage("Face enrolled successfully ✅");
-      loadProfile();
+      await loadProfile();
     } catch (err: any) {
       setMessage(err.response?.data?.detail || "Enrollment failed ❌");
+    } finally {
+      setLoading(false);
     }
-
-    setLoading(false);
   };
 
   // ================= MARK ATTENDANCE =================
   const captureAndMark = async () => {
-    if (!activeSession?.id) {
+    if (!activeSession?.session_id) {
       setMessage("No active session ❌");
       return;
     }
@@ -132,7 +139,7 @@ export default function StudentDashboard() {
     setLoading(true);
     setMessage("");
 
-    const imageSrc = webcamRef.current?.getScreenshot();
+    const imageSrc = captureImage();
 
     if (!imageSrc) {
       setMessage("Camera capture failed ❌");
@@ -152,36 +159,35 @@ export default function StudentDashboard() {
           });
 
           await markAttendance({
-            session_id: activeSession.id,
+            session_id: activeSession.session_id,
             latitude,
             longitude,
             file,
           });
 
           setSuccessPulse(true);
-          setMessage("Attendance Marked Successfully");
+          setMessage("Attendance Marked Successfully ✅");
 
           setTimeout(() => {
             setSuccessPulse(false);
           }, 2500);
 
-          loadHistory();
-          loadAnalytics();
+          await loadHistory();
+          await loadAnalytics();
         } catch (err: any) {
           setMessage(err.response?.data?.detail || "Failed ❌");
+        } finally {
+          setLoading(false);
         }
-
-        setLoading(false);
       },
       () => {
         setMessage("Location permission required ❌");
         setLoading(false);
-      },
+      }
     );
   };
 
   // ================= CHART DATA =================
-
   const trendData = history.map((h: any) => ({
     date: h.timestamp ? new Date(h.timestamp).toLocaleDateString() : "Unknown",
     present: h.status === "Present" ? 1 : 0,
@@ -195,19 +201,19 @@ export default function StudentDashboard() {
     : [];
 
   return (
-    <div className="min-h-screen flex flex-col items-center py-10 bg-gradient-to-br from-blue-900 to-black text-white">
+    <div className="min-h-screen flex flex-col items-center py-10 px-4 bg-gradient-to-br from-blue-900 to-black text-white relative">
       <h1 className="text-3xl text-blue-400 mb-4">Student Dashboard</h1>
 
       {/* PROFILE CARD */}
       {profile && (
         <div
-          className={`rounded-xl p-5 mb-6 w-80 text-center backdrop-blur-lg border transition-all duration-500
+          className={`rounded-xl p-5 mb-6 w-full max-w-sm text-center backdrop-blur-lg border transition-all duration-500
           ${
             profile.face_enrolled
               ? "bg-green-500/10 border-green-400 shadow-[0_0_25px_rgba(34,197,94,0.6)]"
               : "bg-red-500/10 border-red-400"
-          }
-        `}>
+          }`}
+        >
           <h2 className="text-lg font-bold text-blue-300">{profile.name}</h2>
 
           <p className="text-sm text-gray-300">{profile.email}</p>
@@ -215,7 +221,9 @@ export default function StudentDashboard() {
           <div className="mt-4 space-y-2 text-sm">
             <p>
               🎫 Badge:
-              <span className="text-blue-300 ml-1">{profile.badge_number}</span>
+              <span className="text-blue-300 ml-1">
+                {profile.badge_number || "N/A"}
+              </span>
             </p>
 
             <p>
@@ -228,13 +236,12 @@ export default function StudentDashboard() {
             <p>
               😊 Face:
               <span
-                className={`ml-2 px-2 py-1 rounded text-xs
-                ${
+                className={`ml-2 px-2 py-1 rounded text-xs ${
                   profile.face_enrolled
                     ? "bg-green-500 text-white"
                     : "bg-red-500 text-white"
-                }
-              `}>
+                }`}
+              >
                 {profile.face_enrolled ? "Enrolled" : "Not Enrolled"}
               </span>
             </p>
@@ -244,7 +251,7 @@ export default function StudentDashboard() {
 
       {/* ANALYTICS */}
       {analytics && (
-        <div className="grid grid-cols-2 gap-4 mb-6 w-80">
+        <div className="grid grid-cols-2 gap-4 mb-6 w-full max-w-sm">
           <div className="bg-white/10 rounded-xl p-4 text-center">
             <p>Total Classes</p>
             <p className="text-2xl">{analytics.total_classes}</p>
@@ -271,26 +278,33 @@ export default function StudentDashboard() {
 
       {/* SESSION STATUS */}
       {activeSession ? (
-        <div className="bg-green-100 text-green-700 px-4 py-2 rounded mb-4">
+        <div className="bg-green-100 text-green-700 px-4 py-2 rounded mb-4 text-center">
           Active Session: {activeSession.class_name}
         </div>
       ) : (
-        <div className="bg-yellow-100 text-yellow-700 px-4 py-2 rounded mb-4">
+        <div className="bg-yellow-100 text-yellow-700 px-4 py-2 rounded mb-4 text-center">
           No Active Session
         </div>
       )}
 
       {/* CAMERA */}
-
       <p className="text-sm text-gray-300 mb-2">
-        Position your face inside the frame
+        Position your full face inside the frame
       </p>
 
-      <div className="relative mb-4">
+      <div className="relative mb-4 w-full max-w-2xl">
         <Webcam
           ref={webcamRef}
+          audio={false}
+          mirrored={true}
           screenshotFormat="image/jpeg"
-          className="rounded-xl shadow-lg"
+          screenshotQuality={0.95}
+          videoConstraints={{
+            facingMode: "user",
+            width: 640,
+            height: 480,
+          }}
+          className="rounded-xl shadow-lg w-full"
         />
 
         {/* FACE GUIDE FRAME */}
@@ -299,21 +313,24 @@ export default function StudentDashboard() {
         </div>
       </div>
 
-      <div className="flex gap-4 mb-8">
+      <div className="flex flex-wrap justify-center gap-4 mb-8">
         <button
           onClick={enrollMyFace}
           disabled={loading}
-          className="bg-white text-blue-900 px-6 py-2 rounded">
+          className="bg-white text-blue-900 px-6 py-2 rounded"
+        >
           {loading ? "Processing..." : "Enroll Face"}
         </button>
 
         <button
           onClick={captureAndMark}
-          disabled={loading || !activeSession}
-          className="bg-blue-500 hover:bg-blue-600 px-6 py-2 rounded">
+          disabled={loading || !activeSession?.session_id}
+          className="bg-blue-500 hover:bg-blue-600 px-6 py-2 rounded disabled:opacity-50"
+        >
           {loading ? "Processing..." : "Mark Attendance"}
         </button>
       </div>
+
       {/* ATTENDANCE TREND */}
       {trendData.length > 0 && (
         <div className="w-full max-w-2xl bg-white/10 rounded-xl p-6 mb-10">
@@ -324,7 +341,6 @@ export default function StudentDashboard() {
               <XAxis dataKey="date" />
               <YAxis />
               <Tooltip />
-
               <Line type="monotone" dataKey="present" stroke="#22c55e" />
             </LineChart>
           </ResponsiveContainer>
@@ -333,7 +349,7 @@ export default function StudentDashboard() {
 
       {/* ATTENDANCE PIE */}
       {analytics && (
-        <div className="bg-white/10 rounded-xl p-6 mb-10">
+        <div className="bg-white/10 rounded-xl p-6 mb-10 w-full max-w-2xl">
           <h2 className="text-lg font-semibold mb-4">
             Attendance Distribution
           </h2>
@@ -345,7 +361,8 @@ export default function StudentDashboard() {
                 dataKey="value"
                 nameKey="name"
                 outerRadius={100}
-                label>
+                label
+              >
                 <Cell fill="#22c55e" />
                 <Cell fill="#ef4444" />
               </Pie>
@@ -357,7 +374,6 @@ export default function StudentDashboard() {
       )}
 
       {/* HISTORY */}
-
       <div className="w-full max-w-md">
         <h2 className="text-lg font-semibold mb-3 text-blue-300">
           Attendance History
@@ -370,10 +386,21 @@ export default function StudentDashboard() {
             {history.map((h: any) => (
               <li
                 key={h.id}
-                className="bg-white/10 rounded p-2 flex justify-between">
-                <span>{new Date(h.timestamp).toLocaleDateString()}</span>
+                className="bg-white/10 rounded p-2 flex justify-between"
+              >
+                <span>
+                  {h.timestamp
+                    ? new Date(h.timestamp).toLocaleDateString()
+                    : "Unknown"}
+                </span>
 
-                <span className="text-green-400">{h.status}</span>
+                <span
+                  className={
+                    h.status === "Present" ? "text-green-400" : "text-red-400"
+                  }
+                >
+                  {h.status}
+                </span>
               </li>
             ))}
           </ul>
@@ -387,12 +414,13 @@ export default function StudentDashboard() {
       )}
 
       {!successPulse && message && (
-        <p className="mt-4 text-gray-300">{message}</p>
+        <p className="mt-4 text-gray-300 text-center">{message}</p>
       )}
 
       <button
         onClick={handleLogout}
-        className="absolute top-5 right-5 bg-red-500 hover:bg-red-600 px-4 py-2 rounded">
+        className="absolute top-5 right-5 bg-red-500 hover:bg-red-600 px-4 py-2 rounded"
+      >
         Logout
       </button>
     </div>

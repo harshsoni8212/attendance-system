@@ -34,17 +34,18 @@ export default function TeacherDashboard() {
   const [attendanceList, setAttendanceList] = useState<any[]>([]);
   const [analytics, setAnalytics] = useState<any>(null);
   const [classAnalytics, setClassAnalytics] = useState<any[]>([]);
+  const [sessionHistory, setSessionHistory] = useState<any[]>([]);
 
   const [studentBadge, setStudentBadge] = useState("");
   const [message, setMessage] = useState("");
   const [loading, setLoading] = useState(false);
-  const [sessionHistory, setSessionHistory] = useState<any[]>([]);
 
   const navigate = useNavigate();
 
   // ================= LOGOUT =================
   const handleLogout = () => {
     localStorage.removeItem("token");
+    localStorage.removeItem("user");
     localStorage.removeItem("role");
     navigate("/");
   };
@@ -117,30 +118,46 @@ export default function TeacherDashboard() {
     loadSessionHistory();
   }, []);
 
-  // ================= LIVE POLLING =================
+  // ================= LOAD SESSION DATA WHEN ACTIVE SESSION CHANGES =================
   useEffect(() => {
-    if (!activeSession?.id) return;
+    if (!activeSession?.session_id) return;
 
-    loadAttendance(activeSession.id);
-    loadAnalytics(activeSession.id);
+    loadAttendance(activeSession.session_id);
+    loadAnalytics(activeSession.session_id);
+  }, [activeSession?.session_id]);
 
-    const wsUrl = import.meta.env.VITE_API_WS || "ws://localhost:8000";
-    const ws = new WebSocket(`${wsUrl}/ws/attendance`);
+  // ================= LIVE POLLING / WEBSOCKET =================
+  // ================= LIVE UPDATES (WEBSOCKET + FALLBACK POLLING) =================
+  useEffect(() => {
+    if (!activeSession?.session_id) return;
+
+    const sessionId = activeSession.session_id;
+    const wsBase = import.meta.env.VITE_API_WS || "ws://localhost:8000";
+    const ws = new WebSocket(`${wsBase}/ws/attendance`);
+
+    const refreshSessionData = async () => {
+      try {
+        await loadActiveSession();
+        await loadAttendance(sessionId);
+        await loadAnalytics(sessionId);
+      } catch (err) {
+        console.log("Live refresh failed", err);
+      }
+    };
 
     ws.onopen = () => {
       console.log("WebSocket connected");
     };
 
-    ws.onmessage = (event) => {
+    ws.onmessage = async (event) => {
       try {
         const data = JSON.parse(event.data);
 
         if (
           data.event === "attendance_marked" &&
-          data.session_id === activeSession.id
+          data.session_id === sessionId
         ) {
-          loadAttendance(activeSession.id);
-          loadAnalytics(activeSession.id);
+          await refreshSessionData();
         }
       } catch {
         console.log("Invalid websocket message");
@@ -155,34 +172,21 @@ export default function TeacherDashboard() {
       console.log("WebSocket closed");
     };
 
-    return () => ws.close();
-  }, [activeSession?.id]);
+    // Fallback polling every 5 sec (important for demo reliability)
+    const interval = setInterval(async () => {
+      await refreshSessionData();
+    }, 5000);
+
+    return () => {
+      clearInterval(interval);
+      ws.close();
+    };
+  }, [activeSession?.session_id]);
   // ================= ENROLL STUDENT =================
   const handleEnroll = async (e: React.FormEvent) => {
     e.preventDefault();
 
-    if (!profile?.assigned_class) {
-      setMessage("No class assigned ❌");
-      return;
-    }
-
-    try {
-      await enrollStudent({
-        class_code: profile.assigned_class,
-        student_badge: studentBadge,
-      });
-
-      setMessage("Student enrolled successfully ✅");
-      setStudentBadge("");
-      loadClassAnalytics();
-    } catch (err: any) {
-      setMessage(err.response?.data?.detail || "Enrollment failed ❌");
-    }
-  };
-
-  // ================= START SESSION =================
-  const handleStart = async () => {
-    if (!profile?.assigned_class) {
+    if (!profile?.assigned_class_code) {
       setMessage("No class assigned ❌");
       return;
     }
@@ -190,46 +194,78 @@ export default function TeacherDashboard() {
     try {
       setLoading(true);
 
-      navigator.geolocation.getCurrentPosition(
-        async (position) => {
-          const latitude = position.coords.latitude;
-          const longitude = position.coords.longitude;
+      await enrollStudent({
+        class_code: profile.assigned_class_code,
+        student_badge: studentBadge,
+      });
 
+      setMessage("Student enrolled successfully ✅");
+      setStudentBadge("");
+      await loadClassAnalytics();
+    } catch (err: any) {
+      setMessage(err.response?.data?.detail || "Enrollment failed ❌");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  // ================= START SESSION =================
+  const handleStart = async () => {
+    if (!profile?.assigned_class_code) {
+      setMessage("No class assigned ❌");
+      return;
+    }
+
+    setLoading(true);
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        const latitude = position.coords.latitude;
+        const longitude = position.coords.longitude;
+
+        try {
           await startSession({
-            class_code: profile.assigned_class,
+            class_code: profile.assigned_class_code,
             latitude,
             longitude,
             radius_meters: 20,
           });
 
           await loadActiveSession();
+          await loadSessionHistory();
+          await loadClassAnalytics();
 
           setMessage("Session Started 🚀");
+        } catch (err: any) {
+          setMessage(
+            err.response?.data?.detail || "Failed to start session ❌",
+          );
+        } finally {
           setLoading(false);
-        },
-        () => {
-          setMessage("Location permission required ❌");
-          setLoading(false);
-        },
-      );
-    } catch (err: any) {
-      setMessage(err.response?.data?.detail || "Failed to start session ❌");
-      setLoading(false);
-    }
+        }
+      },
+      () => {
+        setMessage("Location permission required ❌");
+        setLoading(false);
+      },
+    );
   };
 
   // ================= END SESSION =================
   const handleEnd = async () => {
-    if (!activeSession?.id) return;
+    if (!activeSession?.session_id) return;
 
     try {
       setLoading(true);
 
-      await endSession(activeSession.id);
+      await endSession(activeSession.session_id);
 
       setActiveSession(null);
       setAttendanceList([]);
       setAnalytics(null);
+
+      await loadSessionHistory();
+      await loadClassAnalytics();
 
       setMessage("Session Ended 🛑");
     } catch (err: any) {
@@ -240,15 +276,12 @@ export default function TeacherDashboard() {
   };
 
   // ================= CHART DATA =================
-
-  // session trend
   const trendData = sessionHistory.map((s: any) => ({
     date: s.date ? new Date(s.date).toLocaleDateString() : "Unknown",
     present: s.present,
     absent: s.absent,
   }));
 
-  // pie chart
   const pieData = analytics
     ? [
         { name: "Present", value: analytics.present_students },
@@ -256,7 +289,6 @@ export default function TeacherDashboard() {
       ]
     : [];
 
-  // bar chart
   const barData = classAnalytics.map((s: any) => ({
     name: s.student_name,
     attendance: s.attendance_percentage,
@@ -264,17 +296,18 @@ export default function TeacherDashboard() {
 
   // ================= DOWNLOAD CSV =================
   const handleDownload = async () => {
-    if (!activeSession?.id) return;
+    if (!activeSession?.session_id) return;
 
     try {
-      const blob = await exportAttendance(activeSession.id);
+      const blob = await exportAttendance(activeSession.session_id);
 
       const url = window.URL.createObjectURL(blob);
-
       const a = document.createElement("a");
       a.href = url;
-      a.download = `attendance_session_${activeSession.id}.csv`;
+      a.download = `attendance_session_${activeSession.session_id}.csv`;
       a.click();
+
+      window.URL.revokeObjectURL(url);
     } catch {
       setMessage("Failed to download CSV ❌");
     }
@@ -298,7 +331,7 @@ export default function TeacherDashboard() {
       </div>
 
       {/* PROFILE CARD */}
-      <div className="bg-white/10 backdrop-blur-lg border border-white/20 rounded-xl p-5 mb-8 w-80 shadow-lg">
+      <div className="bg-white/10 backdrop-blur-lg border border-white/20 rounded-xl p-5 mb-8 w-96 shadow-lg">
         <h2 className="text-xl font-bold text-blue-300 mb-2">{profile.name}</h2>
 
         <p className="text-sm text-gray-300 mb-3">{profile.email}</p>
@@ -306,7 +339,9 @@ export default function TeacherDashboard() {
         <div className="space-y-2 text-sm">
           <p>
             🎫 Badge:
-            <span className="text-blue-300 ml-1">{profile.badge_number}</span>
+            <span className="text-blue-300 ml-1">
+              {profile.badge_number || "N/A"}
+            </span>
           </p>
 
           <p>
@@ -317,9 +352,18 @@ export default function TeacherDashboard() {
           </p>
 
           <p>
+            🔑 Class Code:
+            <span className="text-yellow-300 ml-1">
+              {profile.assigned_class_code || "Not Available"}
+            </span>
+          </p>
+
+          <p>
             📡 Session:
             <span
-              className={`ml-1 ${activeSession ? "text-green-400" : "text-red-400"}`}>
+              className={`ml-1 ${
+                activeSession ? "text-green-400" : "text-red-400"
+              }`}>
               {activeSession ? "Active" : "Inactive"}
             </span>
           </p>
@@ -335,6 +379,13 @@ export default function TeacherDashboard() {
           <h2 className="text-lg font-semibold text-blue-300 mb-3">
             Enroll Student
           </h2>
+
+          <p className="text-sm text-gray-300 mb-3">
+            Class Code:{" "}
+            <span className="text-yellow-300">
+              {profile.assigned_class_code || "Not Assigned"}
+            </span>
+          </p>
 
           <input
             placeholder="Student Badge ID"
@@ -356,6 +407,13 @@ export default function TeacherDashboard() {
           <h2 className="text-lg font-semibold text-blue-300">
             Attendance Session
           </h2>
+
+          <p className="text-sm text-gray-300">
+            Using Class Code:{" "}
+            <span className="text-yellow-300">
+              {profile.assigned_class_code || "Not Assigned"}
+            </span>
+          </p>
 
           {!activeSession ? (
             <button
@@ -379,7 +437,7 @@ export default function TeacherDashboard() {
       {activeSession && (
         <div className="mt-8 bg-white/10 backdrop-blur border border-white/20 rounded-xl p-6">
           <h2 className="text-lg font-semibold text-blue-300 mb-4">
-            Live Attendance
+            Live Attendance ({activeSession.class_name})
           </h2>
 
           {attendanceList.length === 0 ? (
@@ -426,7 +484,6 @@ export default function TeacherDashboard() {
             </div>
           </div>
 
-          {/* DOWNLOAD CSV BUTTON */}
           <button
             onClick={handleDownload}
             className="mt-4 bg-purple-500 hover:bg-purple-600 px-4 py-2 rounded">
@@ -442,7 +499,7 @@ export default function TeacherDashboard() {
             Student Attendance Performance
           </h2>
 
-          {classAnalytics.map((student: any, index: number) => {
+          {classAnalytics.map((student: any) => {
             const percentage = student.attendance_percentage;
 
             const color =
@@ -453,7 +510,7 @@ export default function TeacherDashboard() {
                   : "bg-red-400";
 
             return (
-              <div key={index} className="mb-3">
+              <div key={student.student_name} className="mb-3">
                 <div className="flex justify-between text-sm mb-1">
                   <span>{student.student_name}</span>
                   <span>{percentage}%</span>
@@ -477,19 +534,19 @@ export default function TeacherDashboard() {
           <h2 className="text-lg font-semibold mb-4">Session History</h2>
 
           <div className="space-y-2">
-            {sessionHistory.map((session: any, index: number) => {
-              const date = new Date(session.date).toLocaleDateString();
+            {sessionHistory.map((session: any) => {
+              const date = session.date
+                ? new Date(session.date).toLocaleDateString()
+                : "Unknown";
 
               return (
                 <div
-                  key={index}
+                  key={session.session_id}
                   className="flex justify-between bg-white/10 p-3 rounded text-sm">
                   <span>{date}</span>
-
                   <span className="text-green-400">
                     Present: {session.present}
                   </span>
-
                   <span className="text-red-400">Absent: {session.absent}</span>
                 </div>
               );
@@ -497,8 +554,8 @@ export default function TeacherDashboard() {
           </div>
         </div>
       )}
-      {/* ATTENDANCE TREND */}
 
+      {/* ATTENDANCE TREND */}
       {trendData.length > 0 && (
         <div className="mt-10 bg-white/10 rounded-xl p-6">
           <h2 className="text-lg font-semibold mb-4">Attendance Trend</h2>
@@ -508,9 +565,7 @@ export default function TeacherDashboard() {
               <XAxis dataKey="date" />
               <YAxis />
               <Tooltip />
-
               <Line type="monotone" dataKey="present" stroke="#22c55e" />
-
               <Line type="monotone" dataKey="absent" stroke="#ef4444" />
             </LineChart>
           </ResponsiveContainer>
@@ -518,7 +573,6 @@ export default function TeacherDashboard() {
       )}
 
       {/* ATTENDANCE DISTRIBUTION */}
-
       {analytics && (
         <div className="mt-10 bg-white/10 rounded-xl p-6 max-w-xl">
           <h2 className="text-lg font-semibold mb-4">
@@ -544,7 +598,6 @@ export default function TeacherDashboard() {
       )}
 
       {/* STUDENT PERFORMANCE */}
-
       {barData.length > 0 && (
         <div className="mt-10 bg-white/10 rounded-xl p-6">
           <h2 className="text-lg font-semibold mb-4">Student Performance</h2>
@@ -554,7 +607,6 @@ export default function TeacherDashboard() {
               <XAxis dataKey="name" angle={-45} textAnchor="end" interval={0} />
               <YAxis />
               <Tooltip />
-
               <Bar dataKey="attendance" fill="#3b82f6" />
             </BarChart>
           </ResponsiveContainer>

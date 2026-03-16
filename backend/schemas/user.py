@@ -2,7 +2,7 @@ from pydantic import BaseModel, EmailStr
 
 
 # Student self registration
-class StudentCreate(BaseModel):
+class UserCreate(BaseModel):
     name: str
     email: EmailStr
     password: str

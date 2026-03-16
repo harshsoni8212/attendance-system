@@ -1,4 +1,4 @@
-from fastapi import APIRouter, Depends, UploadFile, File, HTTPException
+from fastapi import APIRouter, Depends, UploadFile, File, Form, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
 from auth.dependencies import require_role
@@ -11,9 +11,9 @@ router = APIRouter(prefix="/attendance", tags=["Attendance"])
 # ================= MARK ATTENDANCE =================
 @router.post("/mark")
 def mark_attendance_route(
-    session_id: int,   # 🔥 properly named
-    latitude: float,
-    longitude: float,
+    session_id: int = Form(...),
+    latitude: float = Form(...),
+    longitude: float = Form(...),
     file: UploadFile = File(...),
     current_user: models.User = Depends(require_role("student")),
     db: Session = Depends(get_db)
@@ -22,7 +22,7 @@ def mark_attendance_route(
 
     return mark_attendance(
         db=db,
-        session_id=session_id,  # 🔥 aligned
+        session_id=session_id,
         student_id=current_user.id,
         latitude=latitude,
         longitude=longitude,
@@ -44,7 +44,7 @@ def get_active_session(
     if not student:
         raise HTTPException(status_code=404, detail="Student not found")
 
-    # 🔥 Correct relationship name
+    # Correct relationship name
     class_obj = student.enrolled_classes[0] if student.enrolled_classes else None
 
     if not class_obj:
@@ -59,7 +59,7 @@ def get_active_session(
         return None
 
     return {
-        "session_id": session.id,  # 🔥 consistent naming
+        "session_id": session.id,
         "class_name": class_obj.name,
         "is_active": session.is_active
     }
@@ -88,16 +88,35 @@ def get_my_attendance(
 
     return result
 
+
+# ================= STUDENT ANALYTICS =================
 @router.get("/my-analytics")
 def get_my_analytics(
     current_user: models.User = Depends(require_role("student")),
     db: Session = Depends(get_db)
 ):
+    # get student's enrolled class
+    class_obj = current_user.enrolled_classes[0] if current_user.enrolled_classes else None
 
-    total_sessions = db.query(models.AttendanceSession).count()
+    if not class_obj:
+        return {
+            "total_classes": 0,
+            "present": 0,
+            "absent": 0,
+            "attendance_percentage": 0
+        }
 
-    present = db.query(models.Attendance).filter(
-        models.Attendance.student_id == current_user.id
+    # only sessions of student's class
+    total_sessions = db.query(models.AttendanceSession).filter(
+        models.AttendanceSession.class_id == class_obj.id
+    ).count()
+
+    # only attendance records of this student in that class
+    present = db.query(models.Attendance).join(
+        models.AttendanceSession
+    ).filter(
+        models.Attendance.student_id == current_user.id,
+        models.AttendanceSession.class_id == class_obj.id
     ).count()
 
     absent = total_sessions - present

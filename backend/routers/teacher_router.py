@@ -1,9 +1,8 @@
 from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 from database import get_db
-from auth.dependencies import require_role, get_current_user
+from auth.dependencies import require_role
 import models
-from models import User
 from datetime import datetime
 from schemas.enrollment_schema import EnrollStudent
 from services.enrollment_service import enroll_student
@@ -13,17 +12,40 @@ import io
 
 router = APIRouter(prefix="/teacher", tags=["Teacher"])
 
+
+# ======================================
+# GET TEACHER PROFILE
+# ======================================
 @router.get("/me")
-def get_teacher_profile(current_user: models.User = Depends(require_role("teacher"))):
+def get_teacher_profile(
+    current_user: models.User = Depends(require_role("teacher")),
+    db: Session = Depends(get_db)
+):
+    assigned_class = None
+    assigned_class_code = None
+
+    if current_user.classes and len(current_user.classes) > 0:
+        assigned_class = current_user.classes[0].name
+        assigned_class_code = current_user.classes[0].code
+
+    active_session = db.query(models.AttendanceSession).filter(
+        models.AttendanceSession.teacher_id == current_user.id,
+        models.AttendanceSession.is_active == True
+    ).first()
+
     return {
         "id": current_user.id,
         "name": current_user.name,
         "email": current_user.email,
-        "role": current_user.role
+        "badge_number": current_user.badge_number,
+        "assigned_class": assigned_class,
+        "assigned_class_code": assigned_class_code,
+        "session_active": active_session is not None
     }
 
+
 # ======================================
-# ✅ ENROLL STUDENT
+# ENROLL STUDENT
 # ======================================
 @router.post("/enroll-student")
 def enroll_student_route(
@@ -40,7 +62,7 @@ def enroll_student_route(
 
 
 # ======================================
-# ✅ START SESSION (SESSION_ID BASED)
+# START SESSION
 # ======================================
 @router.post("/start-session")
 def start_attendance_session(
@@ -51,8 +73,6 @@ def start_attendance_session(
     current_user: models.User = Depends(require_role("teacher")),
     db: Session = Depends(get_db)
 ):
-
-    # 1️⃣ Find class
     class_obj = db.query(models.Class).filter(
         models.Class.code == class_code,
         models.Class.teacher_id == current_user.id
@@ -61,7 +81,6 @@ def start_attendance_session(
     if not class_obj:
         raise HTTPException(status_code=404, detail="Class not found or unauthorized")
 
-    # 2️⃣ Prevent multiple active sessions
     existing_session = db.query(models.AttendanceSession).filter(
         models.AttendanceSession.class_id == class_obj.id,
         models.AttendanceSession.is_active == True
@@ -70,7 +89,6 @@ def start_attendance_session(
     if existing_session:
         raise HTTPException(status_code=400, detail="Attendance session already active")
 
-    # 3️⃣ Create session
     new_session = models.AttendanceSession(
         class_id=class_obj.id,
         teacher_id=current_user.id,
@@ -91,7 +109,7 @@ def start_attendance_session(
 
 
 # ======================================
-# ✅ END SESSION (SESSION_ID BASED)
+# END SESSION
 # ======================================
 @router.post("/end-session")
 def end_attendance_session(
@@ -99,7 +117,6 @@ def end_attendance_session(
     current_user: models.User = Depends(require_role("teacher")),
     db: Session = Depends(get_db)
 ):
-
     session = db.query(models.AttendanceSession).filter(
         models.AttendanceSession.id == session_id,
         models.AttendanceSession.teacher_id == current_user.id,
@@ -118,14 +135,13 @@ def end_attendance_session(
 
 
 # ======================================
-# ✅ GET ACTIVE SESSION
+# GET ACTIVE SESSION
 # ======================================
 @router.get("/active-session")
 def get_active_session(
     current_user: models.User = Depends(require_role("teacher")),
     db: Session = Depends(get_db)
 ):
-
     session = db.query(models.AttendanceSession).filter(
         models.AttendanceSession.teacher_id == current_user.id,
         models.AttendanceSession.is_active == True
@@ -142,7 +158,7 @@ def get_active_session(
 
 
 # ======================================
-# ✅ GET SESSION ATTENDANCE
+# GET SESSION ATTENDANCE
 # ======================================
 @router.get("/session-attendance/{session_id}")
 def get_session_attendance(
@@ -150,8 +166,6 @@ def get_session_attendance(
     current_user: models.User = Depends(require_role("teacher")),
     db: Session = Depends(get_db)
 ):
-
-    # Ensure session belongs to teacher
     session = db.query(models.AttendanceSession).filter(
         models.AttendanceSession.id == session_id,
         models.AttendanceSession.teacher_id == current_user.id
@@ -175,13 +189,16 @@ def get_session_attendance(
 
     return result
 
+
+# ======================================
+# GET SESSION ANALYTICS
+# ======================================
 @router.get("/session-analytics/{session_id}")
 def get_session_analytics(
     session_id: int,
-    current_user = Depends(require_role("teacher")),
+    current_user: models.User = Depends(require_role("teacher")),
     db: Session = Depends(get_db)
 ):
-
     session = db.query(models.AttendanceSession).filter(
         models.AttendanceSession.id == session_id,
         models.AttendanceSession.teacher_id == current_user.id
@@ -212,13 +229,15 @@ def get_session_analytics(
         "attendance_rate": attendance_rate
     }
 
+
+# ======================================
+# GET CLASS ANALYTICS
+# ======================================
 @router.get("/class-analytics")
 def get_class_analytics(
-    current_user = Depends(require_role("teacher")),
+    current_user: models.User = Depends(require_role("teacher")),
     db: Session = Depends(get_db)
 ):
-
-    # find teacher class
     class_obj = db.query(models.Class).filter(
         models.Class.teacher_id == current_user.id
     ).first()
@@ -227,7 +246,6 @@ def get_class_analytics(
         return []
 
     students = class_obj.students
-
     result = []
 
     total_sessions = db.query(models.AttendanceSession).filter(
@@ -235,7 +253,6 @@ def get_class_analytics(
     ).count()
 
     for student in students:
-
         present_count = db.query(models.Attendance).join(
             models.AttendanceSession
         ).filter(
@@ -255,14 +272,27 @@ def get_class_analytics(
 
     return result
 
-@router.get("/export-attendance/{session_id}")
-def export_attendance(session_id: int, db: Session = Depends(get_db)):
 
-    records = (
-        db.query(models.Attendance)
-        .filter(models.Attendance.session_id == session_id)
-        .all()
-    )
+# ======================================
+# EXPORT ATTENDANCE CSV
+# ======================================
+@router.get("/export-attendance/{session_id}")
+def export_attendance(
+    session_id: int,
+    current_user: models.User = Depends(require_role("teacher")),
+    db: Session = Depends(get_db)
+):
+    session = db.query(models.AttendanceSession).filter(
+        models.AttendanceSession.id == session_id,
+        models.AttendanceSession.teacher_id == current_user.id
+    ).first()
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Session not found")
+
+    records = db.query(models.Attendance).filter(
+        models.Attendance.session_id == session_id
+    ).all()
 
     output = io.StringIO()
     writer = csv.writer(output)
@@ -282,17 +312,15 @@ def export_attendance(session_id: int, db: Session = Depends(get_db)):
         },
     )
 
+
 # ======================================
 # GET SESSION HISTORY
 # ======================================
-
 @router.get("/session-history")
 def get_session_history(
     current_user: models.User = Depends(require_role("teacher")),
     db: Session = Depends(get_db)
 ):
-
-    # find teacher class
     class_obj = db.query(models.Class).filter(
         models.Class.teacher_id == current_user.id
     ).first()
@@ -307,13 +335,11 @@ def get_session_history(
     result = []
 
     for session in sessions:
-
         present_count = db.query(models.Attendance).filter(
             models.Attendance.session_id == session.id
         ).count()
 
         total_students = len(class_obj.students)
-
         absent_count = total_students - present_count
 
         result.append({

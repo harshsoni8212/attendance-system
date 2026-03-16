@@ -19,11 +19,7 @@ export const enrollFace = async (file: File) => {
   const formData = new FormData()
   formData.append("file", file)
 
-  const res = await api.post("/users/enroll-face", formData, {
-    headers: {
-      "Content-Type": "multipart/form-data"
-    }
-  })
+  const res = await api.post("/users/enroll-face", formData)
 
   return res.data
 }
@@ -38,7 +34,6 @@ export const markAttendance = async ({
   longitude,
   file
 }: MarkAttendancePayload) => {
-
   const formData = new FormData()
 
   formData.append("session_id", String(session_id))
@@ -46,11 +41,7 @@ export const markAttendance = async ({
   formData.append("longitude", String(longitude))
   formData.append("file", file)
 
-  const res = await api.post("/attendance/mark", formData, {
-    headers: {
-      "Content-Type": "multipart/form-data"
-    }
-  })
+  const res = await api.post("/attendance/mark", formData)
 
   return res.data
 }
@@ -69,7 +60,7 @@ export const getActiveSession = async () => {
 // ============================
 
 export const getMyProfile = async () => {
-  const res = await api.get("/student/me")
+  const res = await api.get("/users/me")
   return res.data
 }
 

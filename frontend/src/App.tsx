@@ -1,5 +1,6 @@
 import { Routes, Route } from "react-router-dom"
 import Login from "./pages/Login"
+import Register from "./pages/Register"
 import AdminDashboard from "./pages/AdminDashboard"
 import TeacherDashboard from "./pages/TeacherDashboard"
 import StudentDashboard from "./pages/StudentDashboard"
@@ -9,8 +10,10 @@ export default function App() {
   return (
     <Routes>
 
-      {/* Public */}
+      {/* Public Routes */}
       <Route path="/" element={<Login />} />
+      <Route path="/login" element={<Login />} />
+      <Route path="/register" element={<Register />} />
 
       {/* Admin */}
       <Route

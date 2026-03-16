@@ -1,15 +1,16 @@
 from pydantic import BaseModel
-from typing import List
+from typing import Optional
+
 
 class ClassCreate(BaseModel):
     name: str
-    teacher_badge: str   # 🔥 
 
 
 class ClassResponse(BaseModel):
     id: int
     name: str
-    teacher_id: int   # internal DB id (fine to return)
+    code: Optional[str] = None
+    teacher_id: Optional[int] = None
 
     class Config:
         from_attributes = True

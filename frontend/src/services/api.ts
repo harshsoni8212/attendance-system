@@ -1,7 +1,7 @@
 import axios from "axios"
 
 const api = axios.create({
-  baseURL: "http://127.0.0.1:8000",
+   baseURL: import.meta.env.VITE_API_URL || "http://127.0.0.1:8000",
 })
 
 // 🔐 Attach token automatically
@@ -14,5 +14,22 @@ api.interceptors.request.use((config) => {
 
   return config
 })
+
+// 🚨 Handle expired token / unauthorized access
+api.interceptors.response.use(
+  (response) => response,
+  (error) => {
+    if (error.response?.status === 401) {
+      localStorage.removeItem("token")
+      localStorage.removeItem("user")
+      localStorage.removeItem("role")
+
+      // Redirect to login
+      window.location.href = "/"
+    }
+
+    return Promise.reject(error)
+  }
+)
 
 export default api
