@@ -210,3 +210,80 @@ def mark_attendance(
         print("WebSocket broadcast error:", e)
 
     return {"message": "Attendance marked successfully"}
+
+# =====================================================
+# Manual Attendance Marking (Teacher Fallback)
+# =====================================================
+def manual_mark_attendance(
+    db: Session,
+    session_id: int,
+    teacher_id: int,
+    student_badge: str
+):
+    # 1️⃣ Find active session
+    session = db.query(models.AttendanceSession).filter(
+        models.AttendanceSession.id == session_id,
+        models.AttendanceSession.is_active == True
+    ).first()
+
+    if not session:
+        raise HTTPException(status_code=404, detail="Active session not found")
+
+    # 2️⃣ Verify teacher owns this session
+    if session.teacher_id != teacher_id:
+        raise HTTPException(status_code=403, detail="Not authorized for this session")
+
+    # 3️⃣ Get class for session
+    class_obj = session.class_
+
+    if not class_obj:
+        raise HTTPException(status_code=404, detail="Class not found")
+
+    # 4️⃣ Find student by badge
+    student = db.query(models.User).filter(
+        models.User.badge_number == student_badge,
+        models.User.role == "student"
+    ).first()
+
+    if not student:
+        raise HTTPException(status_code=404, detail="Student not found")
+
+    # 5️⃣ Ensure student belongs to this class
+    if student not in class_obj.students:
+        raise HTTPException(status_code=403, detail="Student not enrolled in this class")
+
+    # 6️⃣ Prevent duplicate attendance
+    existing = db.query(models.Attendance).filter(
+        models.Attendance.student_id == student.id,
+        models.Attendance.session_id == session.id
+    ).first()
+
+    if existing:
+        raise HTTPException(status_code=400, detail="Attendance already marked for this student")
+
+    # 7️⃣ Mark attendance manually
+    attendance = models.Attendance(
+        student_id=student.id,
+        session_id=session.id,
+        status="Present"
+    )
+
+    db.add(attendance)
+    db.commit()
+    db.refresh(attendance)
+
+    # 8️⃣ Optional websocket broadcast (safe)
+    try:
+        asyncio.run(
+            manager.broadcast({
+                "event": "attendance_marked",
+                "session_id": session.id,
+                "student_name": student.name
+            })
+        )
+    except Exception as e:
+        print("Manual attendance WebSocket broadcast error:", e)
+
+    return {
+        "message": f"{student.name} marked present manually"
+    }

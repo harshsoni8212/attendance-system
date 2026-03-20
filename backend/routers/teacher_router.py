@@ -6,6 +6,7 @@ import models
 from datetime import datetime
 from schemas.enrollment_schema import EnrollStudent
 from services.enrollment_service import enroll_student
+from services.attendance_service import manual_mark_attendance
 from fastapi.responses import StreamingResponse
 import csv
 import io
@@ -132,6 +133,23 @@ def end_attendance_session(
     db.commit()
 
     return {"message": "Attendance session ended successfully"}
+
+# ======================================
+# MANUAL MARK ATTENDANCE
+# ======================================
+@router.post("/manual-mark")
+def manual_mark_attendance_route(
+    session_id: int,
+    student_badge: str,
+    current_user: models.User = Depends(require_role("teacher")),
+    db: Session = Depends(get_db)
+):
+    return manual_mark_attendance(
+        db=db,
+        session_id=session_id,
+        teacher_id=current_user.id,
+        student_badge=student_badge
+    )
 
 
 # ======================================
